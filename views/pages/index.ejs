@@ -1,0 +1,75 @@
+<%- include('../partials/head', {title: title}) %>
+    <section class="hero">
+        <h2>Write stories. Map characters. No login required.</h2>
+        <div class="cta-buttons">
+            <button onclick="startNewStory()" class="btn-primary">Start a New Story</button>
+            <button onclick="openCharacterManager()" class="btn-secondary">Manage Characters</button>
+        </div>
+    </section>
+
+    <section class="features">
+        <div class="feature-card">
+            <h3>👥 Character Network</h3>
+            <p>Visualize relationships between your characters</p>
+            <button onclick="openCharacterManager()">Open Network</button>
+        </div>
+
+        <div class="feature-card">
+            <h3>📝 Simple Writer</h3>
+            <p>Clean, distraction-free writing interface</p>
+            <button onclick="openWriter()">Start Writing</button>
+        </div>
+    </section>
+	
+	    <!-- Clear Data Section - Simple and Separate -->
+    <section class="data-management">
+        <div class="clear-data-card">
+            <h3>🔄 Clear All Data</h3>
+            <p>Remove all stories, characters, and relationships from your browser</p>
+            <button onclick="clearAllData()" class="btn-primary">Clear Everything</button>
+            <small><strong> This action cannot be undone - all your writing will be deleted </strong> </small> 
+        </div>
+    </section>
+	
+
+    <script>
+        // Store data in localStorage
+        function getStoredData() {
+            return {
+                characters: JSON.parse(localStorage.getItem('characters') || '[]'),
+                stories: JSON.parse(localStorage.getItem('stories') || '[]'),
+                currentStory: JSON.parse(localStorage.getItem('currentStory') || 'null')
+            };
+        }
+
+        function startNewStory() {
+            window.location.href = '/writer';
+        }
+
+        function openCharacterManager() {
+            window.location.href = '/characters';
+        }
+
+        function openWriter() {
+            window.location.href = '/writer';
+        }
+		
+		function clearAllData() {
+            if (confirm('Are you sure you want to delete ALL your stories, characters, and relationships? This cannot be undone!')) {
+                // Clear all localStorage data
+                localStorage.removeItem('stories');
+                localStorage.removeItem('characters');
+                localStorage.removeItem('relationships');
+                localStorage.removeItem('ml_learning_data');
+                
+                // Optional: Show confirmation
+                alert('All data has been cleared! Starting fresh.');
+                
+                // Optional: Refresh the page to reflect changes
+                window.location.reload();
+            }
+        }
+
+
+    </script>
+<%- include('../partials/footer') %>

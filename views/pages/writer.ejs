@@ -1,0 +1,1307 @@
+<%- include('../partials/head', {title: title}) %>
+    <div class="container">
+        <div class="writer-header">
+            <h2>Story Writer</h2>
+            <div class="writer-controls">
+                <button onclick="toggleFocusMode()" id="focusModeBtn" class="btn-outline">Focus Mode</button>
+                <button onclick="extractCharactersFromStory()" class="btn-outline" id="extractCharsBtn" style="display: none;">Extract Characters</button>
+                <button onclick="saveStory()" class="btn-primary">Save Story</button>
+                <button onclick="exportStory()" class="btn-secondary">Export</button>
+            </div>
+        </div>
+
+        <% if (prompt) { %>
+            <div class="current-prompt">
+                <h4>📝 Your Prompt:</h4>
+                <p>"<%= prompt %>"</p>
+                <button onclick="clearPrompt()" class="btn-small">Clear Prompt</button>
+            </div>
+        <% } %>
+
+        <div class="writer-layout">
+            <div class="sidebar" id="sidebar">
+                <div class="sidebar-section">
+                    <h4>Your Characters</h4>
+                    <div id="characterQuickList">
+                        <!-- Characters will be loaded here -->
+                    </div>
+                </div>
+
+                <div class="sidebar-section">
+                    <h4>Recent Stories</h4>
+                    <div id="recentStoriesList">
+                        <!-- Recent stories will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Character Extraction Panel -->
+                <div class="sidebar-section" id="extractedCharactersPanel" style="display: none;">
+                    <h4>📝 Characters Found in Story</h4>
+                    <div id="extractedCharactersList">
+                        <!-- Extracted characters will appear here -->
+                    </div>
+                    <div class="extraction-actions" id="extractionActions" style="display: none;">
+                        <button onclick="saveExtractedCharacters()" class="btn-small" style="background: #27ae60;">Save to Character Manager</button>
+                        <button onclick="hideExtractionPanel()" class="btn-small">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="writing-area">
+                <div class="story-metadata">
+                    <input type="text" id="storyTitle" placeholder="Untitled Story" class="story-title-input">
+                    <div class="word-count-display">
+                        <span id="wordCount">0</span> words
+                    </div>
+                </div>
+
+                <textarea id="storyContent" placeholder="Once upon a time..." autofocus></textarea>
+
+                <div class="writing-stats">
+                    <div class="stat">
+                        <span class="stat-label">Words:</span>
+                        <span id="wordsStat">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Characters:</span>
+                        <span id="charsStat">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Reading Time:</span>
+                        <span id="timeStat">0 min</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Last Saved:</span>
+                        <span id="lastSaved">Never</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let currentStoryId = null;
+    let autoSaveInterval;
+    let extractedCharacters = [];
+
+    // Load story from URL parameter or create new
+    function loadStory() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const prompt = urlParams.get('prompt') || '<%= prompt %>';
+        const loadId = urlParams.get('load');
+        
+        if (loadId) {
+            // Load existing story
+            const stories = JSON.parse(localStorage.getItem('stories') || '[]');
+            const story = stories.find(s => s.id === loadId);
+            if (story) {
+                currentStoryId = story.id;
+                document.getElementById('storyTitle').value = story.title;
+                document.getElementById('storyContent').value = story.content;
+                document.getElementById('lastSaved').textContent = new Date(story.updatedAt).toLocaleString();
+                updateWordCount();
+            }
+        } else if (prompt) {
+            // New story with prompt
+            document.getElementById('storyContent').value = `Story Prompt: "${prompt}"\n\n`;
+        }
+        
+        loadCharacterQuickList();
+        loadRecentStories();
+        startAutoSave();
+        
+        // ALWAYS check for character extraction on load
+        checkCharacterExtraction();
+    }
+
+    // Check if story has potential characters to extract - SIMPLIFIED VERSION
+    function checkCharacterExtraction() {
+        const content = document.getElementById('storyContent').value;
+        const extractBtn = document.getElementById('extractCharsBtn');
+        
+        // Show button if there's any substantial content
+        if (content.length > 20) {
+            extractBtn.style.display = 'inline-block';
+            extractBtn.disabled = false;
+        } else {
+            extractBtn.style.display = 'none';
+        }
+    }
+
+    // Extract characters from story content
+    function extractCharactersFromStory() {
+        const content = document.getElementById('storyContent').value;
+        const title = document.getElementById('storyTitle').value || 'Current Story';
+        
+        if (content.length < 20) {
+            alert('Write more content (at least 20 characters) to extract characters!');
+            return;
+        }
+        
+        console.log('🔄 Starting character extraction...');
+        
+        // Show loading state
+        const extractBtn = document.getElementById('extractCharsBtn');
+        extractBtn.innerHTML = '<div class="loading-spinner"></div> Analyzing...';
+        extractBtn.disabled = true;
+        
+        try {
+            // Use setTimeout to allow UI to update
+            setTimeout(() => {
+                extractedCharacters = mlAnalyzer.extractCharactersFromText(content, title);
+                console.log('✅ Extracted characters:', extractedCharacters);
+                
+                extractBtn.innerHTML = 'Extract Characters';
+                extractBtn.disabled = false;
+                
+                if (extractedCharacters.length === 0) {
+                    this.showExtractionResult('No characters found', 'Try using proper names like "John", "Sarah", "Dr. Smith" in your story.', 'warning');
+                    return;
+                }
+                
+                this.showExtractionResult(`Found ${extractedCharacters.length} characters`, 'Review and save them to your character manager', 'success');
+                displayExtractedCharacters(extractedCharacters);
+                
+                // Track the extraction
+                if (typeof mlTracker !== 'undefined') {
+                    mlTracker.trackCharacterExtraction(extractedCharacters.length, extractedCharacters.length);
+                }
+                
+            }, 100);
+        } catch (error) {
+            console.error('❌ Error extracting characters:', error);
+            extractBtn.innerHTML = 'Extract Characters';
+            extractBtn.disabled = false;
+            this.showExtractionResult('Extraction failed', error.message, 'error');
+        }
+    }
+
+    // Show extraction result message
+    function showExtractionResult(title, message, type = 'info') {
+        const panel = document.getElementById('extractedCharactersPanel');
+        const header = panel.querySelector('h4');
+        
+        // Update header with result
+        header.innerHTML = `
+            <span class="result-icon ${type}">${type === 'success' ? '✨' : type === 'warning' ? '⚠️' : '❌'}</span>
+            ${title}
+        `;
+        
+        // Show message temporarily
+        const messageEl = document.createElement('div');
+        messageEl.className = `extraction-message ${type}`;
+        messageEl.innerHTML = message;
+        header.parentNode.insertBefore(messageEl, header.nextSibling);
+        
+        // Remove message after 3 seconds
+        setTimeout(() => {
+            if (messageEl.parentNode) {
+                messageEl.parentNode.removeChild(messageEl);
+            }
+        }, 3000);
+    }
+
+    // Display extracted characters in the panel
+    function displayExtractedCharacters(characters) {
+        const panel = document.getElementById('extractedCharactersPanel');
+        const list = document.getElementById('extractedCharactersList');
+        const actions = document.getElementById('extractionActions');
+        
+        list.innerHTML = characters.map((char, index) => `
+            <div class="extracted-character" data-confidence="${char.confidence}">
+                <div class="character-header">
+                    <div class="character-badge">
+                        <span class="confidence-dot" style="background: ${this.getConfidenceColor(char.confidence)}"></span>
+                        <span class="character-name-preview">${char.name}</span>
+                    </div>
+                    <div class="character-meta">
+                        <span class="mention-count">${char.mentionCount} mention${char.mentionCount !== 1 ? 's' : ''}</span>
+                        <span class="confidence-score">${Math.round(char.confidence * 100)}%</span>
+                    </div>
+                </div>
+                
+                <div class="character-details">
+                    <div class="input-group">
+                        <label>Character Name:</label>
+                        <input type="text" value="${char.name}" class="char-name-input" 
+                               onchange="updateExtractedCharacter(${index}, 'name', this.value)"
+                               placeholder="Enter character name">
+                    </div>
+                    
+                    <div class="input-group">
+                        <label>Character Role:</label>
+                        <select onchange="updateExtractedCharacter(${index}, 'role', this.value)" class="char-role-select">
+                            <option value="">Choose a role...</option>
+                            <option value="Protagonist" ${char.role === 'Protagonist' ? 'selected' : ''}>🌟 Protagonist</option>
+                            <option value="Antagonist" ${char.role === 'Antagonist' ? 'selected' : ''}>👿 Antagonist</option>
+                            <option value="Supporting" ${char.role === 'Supporting' ? 'selected' : ''}>🤝 Supporting</option>
+                            <option value="Mentor" ${char.role === 'Mentor' ? 'selected' : ''}>🧙 Mentor</option>
+                            <option value="Love Interest" ${char.role === 'Love Interest' ? 'selected' : ''}>💖 Love Interest</option>
+                            <option value="Comic Relief" ${char.role === 'Comic Relief' ? 'selected' : ''}>😂 Comic Relief</option>
+                            <option value="Villain" ${char.role === 'Villain' ? 'selected' : ''}>🦹 Villain</option>
+                            <option value="Hero" ${char.role === 'Hero' ? 'selected' : ''}>🦸 Hero</option>
+                            <option value="Sidekick" ${char.role === 'Sidekick' ? 'selected' : ''}>🎭 Sidekick</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="character-actions">
+                    <button onclick="removeExtractedCharacter(${index})" class="btn-remove" title="Remove character">
+                        <span class="remove-icon">🗑️</span>
+                        Remove
+                    </button>
+                </div>
+            </div>
+        `).join('');
+        
+        panel.style.display = 'block';
+        actions.style.display = 'block';
+        
+        // Add smooth animation
+        panel.style.opacity = '0';
+        panel.style.transform = 'translateY(-10px)';
+        
+        setTimeout(() => {
+            panel.style.opacity = '1';
+            panel.style.transform = 'translateY(0)';
+            panel.style.transition = 'all 0.3s ease';
+        }, 50);
+        
+        // Scroll to panel smoothly
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    // Get confidence color based on score
+    function getConfidenceColor(confidence) {
+        if (confidence >= 0.8) return '#27ae60'; // Green
+        if (confidence >= 0.6) return '#f39c12'; // Orange
+        if (confidence >= 0.4) return '#e67e22'; // Dark orange
+        return '#e74c3c'; // Red
+    }
+
+    // Update an extracted character's property
+    function updateExtractedCharacter(index, property, value) {
+        if (extractedCharacters[index]) {
+            extractedCharacters[index][property] = value;
+            
+            // Update the confidence dot color if name changes significantly
+            if (property === 'name' && value.length > 0) {
+                const characterEl = document.querySelectorAll('.extracted-character')[index];
+                if (characterEl) {
+                    const confidenceDot = characterEl.querySelector('.confidence-dot');
+                    const namePreview = characterEl.querySelector('.character-name-preview');
+                    if (confidenceDot && namePreview) {
+                        namePreview.textContent = value;
+                        // Slightly increase confidence when user confirms name
+                        extractedCharacters[index].confidence = Math.min(0.95, extractedCharacters[index].confidence + 0.1);
+                        confidenceDot.style.background = this.getConfidenceColor(extractedCharacters[index].confidence);
+                    }
+                }
+            }
+        }
+    }
+
+    // Remove an extracted character with animation
+    function removeExtractedCharacter(index) {
+        const characterEl = document.querySelectorAll('.extracted-character')[index];
+        if (characterEl) {
+            characterEl.style.transform = 'translateX(-100%)';
+            characterEl.style.opacity = '0';
+            characterEl.style.transition = 'all 0.3s ease';
+            
+            setTimeout(() => {
+                extractedCharacters.splice(index, 1);
+                if (extractedCharacters.length === 0) {
+                    hideExtractionPanel();
+                } else {
+                    displayExtractedCharacters(extractedCharacters);
+                }
+            }, 300);
+        }
+    }
+
+    // Save extracted characters to character manager
+    function saveExtractedCharacters() {
+        const validCharacters = extractedCharacters.filter(char => 
+            char.name && char.name.trim() !== '' && char.role
+        );
+        
+        if (validCharacters.length === 0) {
+            this.showSaveResult('No valid characters', 'Please provide names and roles for at least one character.', 'warning');
+            return;
+        }
+        
+        const existingCharacters = JSON.parse(localStorage.getItem('characters') || '[]');
+        const existingNames = new Set(existingCharacters.map(c => c.name.toLowerCase()));
+        
+        const newCharacters = validCharacters.filter(char => 
+            !existingNames.has(char.name.toLowerCase())
+        ).map(char => ({
+            id: 'char_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            name: char.name,
+            role: char.role,
+            description: `Discovered in story: ${char.sourceStory}. Mentioned ${char.mentionCount} times.`,
+            goals: '',
+            createdAt: new Date().toISOString(),
+            discovered: true,
+            initialMentions: char.mentionCount,
+            confidence: char.confidence
+        }));
+        
+        if (newCharacters.length === 0) {
+            this.showSaveResult('No new characters', 'All extracted characters already exist in your character manager.', 'info');
+            hideExtractionPanel();
+            return;
+        }
+        
+        const allCharacters = [...existingCharacters, ...newCharacters];
+        localStorage.setItem('characters', JSON.stringify(allCharacters));
+        
+        // Show success animation
+        this.showSaveResult('Characters saved!', `${newCharacters.length} characters added to your character manager.`, 'success');
+        
+        // Animate the save button
+        const saveBtn = document.querySelector('.extraction-actions .btn-small[style*="background: #27ae60"]');
+        if (saveBtn) {
+            saveBtn.innerHTML = '✓ Saved!';
+            saveBtn.style.background = '#2ecc71';
+            setTimeout(() => {
+                saveBtn.innerHTML = 'Save to Character Manager';
+                saveBtn.style.background = '#27ae60';
+            }, 2000);
+        }
+        
+        setTimeout(() => {
+            hideExtractionPanel();
+            loadCharacterQuickList();
+            
+            // Refresh ML analysis with new characters
+            try {
+                mlAnalyzer.buildCharacterStoryConnections(
+                    JSON.parse(localStorage.getItem('stories') || '[]'),
+                    allCharacters
+                );
+            } catch (error) {
+                console.error('Error refreshing ML analysis:', error);
+            }
+        }, 1500);
+    }
+
+    // Show save result message
+    function showSaveResult(title, message, type = 'info') {
+        const actions = document.getElementById('extractionActions');
+        const messageEl = document.createElement('div');
+        messageEl.className = `save-result-message ${type}`;
+        messageEl.innerHTML = `
+            <strong>${title}</strong>
+            <span>${message}</span>
+        `;
+        actions.parentNode.insertBefore(messageEl, actions);
+        
+        // Remove message after 3 seconds
+        setTimeout(() => {
+            if (messageEl.parentNode) {
+                messageEl.parentNode.removeChild(messageEl);
+            }
+        }, 3000);
+    }
+
+    // Hide the extraction panel with animation
+    function hideExtractionPanel() {
+        const panel = document.getElementById('extractedCharactersPanel');
+        const actions = document.getElementById('extractionActions');
+        
+        panel.style.opacity = '0';
+        panel.style.transform = 'translateY(-10px)';
+        panel.style.transition = 'all 0.3s ease';
+        
+        setTimeout(() => {
+            panel.style.display = 'none';
+            actions.style.display = 'none';
+            extractedCharacters = [];
+        }, 300);
+    }
+
+    // Load characters for quick reference
+    function loadCharacterQuickList() {
+        const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+        const characterList = document.getElementById('characterQuickList');
+        
+        if (characters.length === 0) {
+            characterList.innerHTML = '<p class="no-data">No characters yet. <a href="/characters">Create some!</a></p>';
+            return;
+        }
+        
+        // Show discovered characters with a different style
+        characterList.innerHTML = characters.slice(0, 8).map(character => `
+            <div class="quick-character ${character.discovered ? 'discovered-character' : ''}" onclick="insertText('${character.name.replace(/'/g, "\\'")}')">
+                <div class="quick-character-content">
+                    <strong>${character.name}</strong>
+                    ${character.role ? `<span class="quick-character-role">${character.role} ${character.discovered ? '✨' : ''}</span>` : ''}
+                </div>
+                ${character.discovered ? `<div class="discovery-badge">Discovered</div>` : ''}
+            </div>
+        `).join('');
+    }
+
+    // Load recent stories with delete functionality
+    function loadRecentStories() {
+        const stories = JSON.parse(localStorage.getItem('stories') || '[]');
+        const recentStoriesList = document.getElementById('recentStoriesList');
+        
+        if (stories.length === 0) {
+            recentStoriesList.innerHTML = '<p class="no-data">No stories yet</p>';
+            return;
+        }
+        
+        recentStoriesList.innerHTML = stories.slice(0, 5).map(story => `
+            <div class="recent-story">
+                <div class="recent-story-content" onclick="loadStoryById('${story.id}')">
+                    <strong>${story.title || 'Untitled'}</strong>
+                    <div class="recent-story-meta">
+                        <span class="story-date">${new Date(story.updatedAt).toLocaleDateString()}</span>
+                        <span class="story-words">${story.wordCount || 0} words</span>
+                    </div>
+                </div>
+                <button onclick="event.stopPropagation(); deleteStory('${story.id}')" class="btn-delete" title="Delete story">
+                    <span class="delete-icon">×</span>
+                </button>
+            </div>
+        `).join('');
+    }
+
+    // Load specific story
+    function loadStoryById(storyId) {
+        window.location.href = `/writer?load=${storyId}`;
+    }
+
+    // Delete story
+    function deleteStory(storyId) {
+        if (confirm('Are you sure you want to delete this story? This action cannot be undone.')) {
+            const stories = JSON.parse(localStorage.getItem('stories') || '[]');
+            const filteredStories = stories.filter(s => s.id !== storyId);
+            localStorage.setItem('stories', JSON.stringify(filteredStories));
+            
+            // If we're currently viewing the deleted story, clear the editor
+            if (currentStoryId === storyId) {
+                currentStoryId = null;
+                document.getElementById('storyTitle').value = '';
+                document.getElementById('storyContent').value = '';
+                document.getElementById('lastSaved').textContent = 'Never';
+                updateWordCount();
+            }
+            
+            loadRecentStories();
+        }
+    }
+
+    // Update word count and stats
+    function updateWordCount() {
+        const content = document.getElementById('storyContent').value;
+        const words = content.trim() ? content.trim().split(/\s+/).length : 0;
+        const characters = content.length;
+        const readingTime = Math.ceil(words / 200); // Average reading speed
+        
+        document.getElementById('wordCount').textContent = words;
+        document.getElementById('wordsStat').textContent = words;
+        document.getElementById('charsStat').textContent = characters;
+        document.getElementById('timeStat').textContent = readingTime + ' min';
+    }
+
+    // Insert text at cursor position
+    function insertText(text) {
+        const textarea = document.getElementById('storyContent');
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const before = textarea.value.substring(0, start);
+        const after = textarea.value.substring(end);
+        
+        textarea.value = before + text + after;
+        textarea.selectionStart = textarea.selectionEnd = start + text.length;
+        textarea.focus();
+        updateWordCount();
+    }
+
+    // Save story with enhanced ML tracking
+    function saveStory() {
+        const title = document.getElementById('storyTitle').value || 'Untitled Story';
+        const content = document.getElementById('storyContent').value;
+        const now = new Date().toISOString();
+        
+        const story = {
+            id: currentStoryId || generateId(),
+            title: title,
+            content: content,
+            wordCount: content.trim() ? content.trim().split(/\s+/).length : 0,
+            createdAt: currentStoryId ? undefined : now,
+            updatedAt: now
+        };
+        
+        const stories = JSON.parse(localStorage.getItem('stories') || '[]');
+        const existingIndex = stories.findIndex(s => s.id === story.id);
+        
+        if (existingIndex >= 0) {
+            stories[existingIndex] = story;
+        } else {
+            stories.unshift(story);
+        }
+        
+        localStorage.setItem('stories', JSON.stringify(stories));
+        currentStoryId = story.id;
+        
+        document.getElementById('lastSaved').textContent = new Date().toLocaleString();
+        loadRecentStories();
+        
+        // Enhanced ML Tracking
+        try {
+            const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
+            if (typeof mlTracker !== 'undefined') {
+                mlTracker.trackWritingSession(wordCount);
+            }
+            
+            // Update character-story connections
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            if (typeof mlAnalyzer !== 'undefined') {
+                mlAnalyzer.buildCharacterStoryConnections(stories, characters);
+            }
+        } catch (error) {
+            console.error('Error in ML tracking:', error);
+        }
+        
+        // Show save confirmation
+        const btn = document.querySelector('.writer-controls .btn-primary');
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Saved!';
+        setTimeout(() => {
+            btn.textContent = originalText;
+        }, 2000);
+        
+        // ALWAYS check for character extraction after save
+        checkCharacterExtraction();
+    }
+
+    // Auto-save every 30 seconds
+    function startAutoSave() {
+        autoSaveInterval = setInterval(saveStory, 30000);
+    }
+
+    // Export story
+    function exportStory() {
+        const title = document.getElementById('storyTitle').value || 'Untitled Story';
+        const content = document.getElementById('storyContent').value;
+        
+        const blob = new Blob([`# ${title}\n\n${content}`], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // Toggle focus mode
+    function toggleFocusMode() {
+        document.body.classList.toggle('focus-mode');
+        const btn = document.getElementById('focusModeBtn');
+        btn.textContent = document.body.classList.contains('focus-mode') ? 'Exit Focus' : 'Focus Mode';
+    }
+
+    // Clear current prompt
+    function clearPrompt() {
+        window.location.href = '/writer';
+    }
+
+    // Generate unique ID
+    function generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substr(2);
+    }
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('📝 Writer page loaded');
+        
+        // Make sure Extract Characters button is visible initially
+        const extractBtn = document.getElementById('extractCharsBtn');
+        extractBtn.style.display = 'inline-block';
+        
+        loadStory();
+        
+        // Auto-update word count AND check character extraction
+        document.getElementById('storyContent').addEventListener('input', function() {
+            updateWordCount();
+            checkCharacterExtraction();
+        });
+        
+        document.getElementById('storyTitle').addEventListener('input', function() {
+            clearTimeout(this._timer);
+            this._timer = setTimeout(saveStory, 1000);
+        });
+        
+        // Quick save on Ctrl+S
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                saveStory();
+            }
+        });
+    });
+</script>        
+
+
+
+
+
+    <style>
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .writer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .writer-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .current-prompt {
+            background: #e8f4fd;
+            border-left: 4px solid #3498db;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+
+        .current-prompt h4 {
+            margin: 0 0 0.5rem 0;
+            color: #2c3e50;
+        }
+
+        .current-prompt p {
+            margin: 0 0 0.5rem 0;
+            font-style: italic;
+        }
+
+        .btn-small {
+            padding: 0.25rem 0.75rem;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .btn-small:hover {
+            background: #2980b9;
+        }
+
+        .writer-layout {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+            height: calc(100vh - 150px);
+        }
+
+        .sidebar {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow-y: auto;
+        }
+
+        .sidebar-section {
+            margin-bottom: 2rem;
+        }
+
+        .sidebar-section h4 {
+            margin: 0 0 1rem 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 0.5rem;
+        }
+
+        .quick-character, .recent-story-content {
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s ease;
+        }
+
+        .quick-character:hover, .recent-story-content:hover {
+            border-color: #3498db;
+            background: #e8f4fd;
+        }
+
+        .discovered-character {
+            border-left: 3px solid #27ae60;
+            background: #e8f6f3;
+        }
+
+        .discovery-info {
+            color: #27ae60;
+            font-size: 0.7rem;
+            font-style: italic;
+        }
+
+        .recent-story {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .recent-story-content {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .btn-delete {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            width: 24px;
+            height: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            font-weight: bold;
+            transition: background 0.2s ease;
+        }
+
+        .btn-delete:hover {
+            background: #c0392b;
+        }
+
+        /* Character Extraction Styles */
+        .extracted-character {
+            background: #f8f9fa;
+            border: 1px solid #e1e1e1;
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .character-info {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .char-name-input {
+            flex: 2;
+            padding: 0.25rem;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 0.9rem;
+        }
+
+        .char-role-select {
+            flex: 1;
+            padding: 0.25rem;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 0.9rem;
+        }
+
+        .character-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: #7f8c8d;
+        }
+
+        .btn-remove {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+        }
+
+        .extraction-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .writing-area {
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .story-metadata {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e1e1e1;
+        }
+
+        .story-title-input {
+            flex: 1;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border: none;
+            background: transparent;
+            padding: 0.5rem;
+        }
+
+        .story-title-input:focus {
+            outline: none;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 0 0 2px #3498db;
+        }
+
+        .word-count-display {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+
+        #storyContent {
+            flex: 1;
+            border: none;
+            padding: 2rem;
+            font-family: 'Georgia', serif;
+            font-size: 1.1rem;
+            line-height: 1.8;
+            resize: none;
+            outline: none;
+        }
+
+        .writing-stats {
+            display: flex;
+            justify-content: space-around;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-top: 1px solid #e1e1e1;
+            font-size: 0.9rem;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-label {
+            display: block;
+            color: #7f8c8d;
+            font-size: 0.8rem;
+        }
+
+        .no-data {
+            color: #7f8c8d;
+            font-style: italic;
+            text-align: center;
+            padding: 1rem;
+        }
+
+        /* Focus Mode */
+        body.focus-mode .sidebar,
+        body.focus-mode .writer-header,
+        body.focus-mode .current-prompt,
+        body.focus-mode .story-metadata,
+        body.focus-mode .writing-stats {
+            display: none;
+        }
+
+        body.focus-mode .writer-layout {
+            grid-template-columns: 1fr;
+            height: calc(100vh - 20px);
+        }
+
+        body.focus-mode .writing-area {
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        body.focus-mode #storyContent {
+            font-size: 1.2rem;
+            line-height: 2;
+        }
+
+        /* Button Styles */
+        .btn-primary, .btn-secondary, .btn-outline {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #e74c3c, #c0392b);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #3498db, #2980b9);
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 2px solid #95a5a6;
+            color: #7f8c8d;
+        }
+
+        .btn-outline:hover {
+            background: #95a5a6;
+            color: white;
+            transform: translateY(-2px);
+        }
+		/* Enhanced Character Extraction Styles */
+.extracted-character {
+    background: white;
+    border: 1px solid #e1e8ed;
+    border-radius: 12px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.extracted-character:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+    transform: translateY(-2px);
+}
+
+.character-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+
+.character-badge {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.confidence-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.character-name-preview {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: #2c3e50;
+}
+
+.character-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.25rem;
+}
+
+.mention-count {
+    font-size: 0.8rem;
+    color: #7f8c8d;
+    background: #f8f9fa;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+}
+
+.confidence-score {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    background: #3498db;
+    padding: 0.2rem 0.5rem;
+    border-radius: 8px;
+}
+
+.character-details {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.input-group label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2c3e50;
+    margin-bottom: 0.25rem;
+}
+
+.char-name-input {
+    padding: 0.75rem;
+    border: 2px solid #e1e8ed;
+    border-radius: 8px;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.char-name-input:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.char-role-select {
+    padding: 0.75rem;
+    border: 2px solid #e1e8ed;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    background: white;
+    transition: all 0.3s ease;
+}
+
+.char-role-select:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.character-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #f1f1f1;
+}
+
+.btn-remove {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.btn-remove:hover {
+    background: #c0392b;
+    transform: translateY(-1px);
+}
+
+.remove-icon {
+    font-size: 0.8rem;
+}
+
+.extraction-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid #ecf0f1;
+}
+
+.extraction-actions .btn-small {
+    flex: 1;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+}
+
+.extraction-actions .btn-small:first-child {
+    background: linear-gradient(135deg, #27ae60, #2ecc71);
+    color: white;
+    box-shadow: 0 2px 8px rgba(39, 174, 96, 0.3);
+}
+
+.extraction-actions .btn-small:first-child:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(39, 174, 96, 0.4);
+}
+
+.extraction-actions .btn-small:last-child {
+    background: #95a5a6;
+    color: white;
+}
+
+.extraction-actions .btn-small:last-child:hover {
+    background: #7f8c8d;
+    transform: translateY(-2px);
+}
+
+/* Loading spinner */
+.loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #ffffff;
+    border-top: 2px solid transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    margin-right: 0.5rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Result messages */
+.extraction-message {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+    border-left: 4px solid;
+}
+
+.extraction-message.success {
+    background: #d5f4e6;
+    border-left-color: #27ae60;
+    color: #155724;
+}
+
+.extraction-message.warning {
+    background: #fff3cd;
+    border-left-color: #ffc107;
+    color: #856404;
+}
+
+.extraction-message.error {
+    background: #f8d7da;
+    border-left-color: #dc3545;
+    color: #721c24;
+}
+
+.save-result-message {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    text-align: center;
+    animation: slideIn 0.3s ease;
+}
+
+.save-result-message.success {
+    background: #d5f4e6;
+    border: 1px solid #27ae60;
+    color: #155724;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Enhanced quick character styles */
+.quick-character {
+    position: relative;
+}
+
+.quick-character-content {
+    padding: 0.75rem;
+}
+
+.quick-character-role {
+    display: block;
+    font-size: 0.8rem;
+    color: #7f8c8d;
+    margin-top: 0.25rem;
+}
+
+.discovery-badge {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: #27ae60;
+    color: white;
+    padding: 0.2rem 0.5rem;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+/* Enhanced recent story styles */
+.recent-story-meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.25rem;
+}
+
+.story-date, .story-words {
+    font-size: 0.8rem;
+    color: #7f8c8d;
+}
+
+.delete-icon {
+    font-size: 1.2rem;
+    font-weight: bold;
+}
+
+/* Panel header enhancements */
+#extractedCharactersPanel h4 {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #2c3e50;
+    margin-bottom: 1rem;
+}
+
+.result-icon {
+    font-size: 1.2rem;
+}
+    </style>
+<%- include('../partials/footer') %>

@@ -1,0 +1,785 @@
+<%- include('../partials/head', {title: title}) %>
+    <div class="container">
+        <h2>Character Manager</h2>
+        <p>Create and manage your characters, then visualize their relationships.</p>
+        
+        <div class="character-section">
+            <div class="character-form">
+                <h3>Add New Character</h3>
+                <form id="characterForm">
+                    <div class="form-group">
+                        <label for="name">Character Name:</label>
+                        <input type="text" id="name" name="name" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="role">Role/Archetype:</label>
+                        <input type="text" id="role" name="role" placeholder="e.g., Hero, Mentor, Villain">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="description">Description:</label>
+                        <textarea id="description" name="description" rows="3" placeholder="Physical appearance, personality, background..."></textarea>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="goals">Goals/Motivations:</label>
+                        <textarea id="goals" name="goals" rows="2" placeholder="What drives this character?"></textarea>
+                    </div>
+                    
+                    <button type="submit" class="btn-primary">Add Character</button>
+                </form>
+
+                <!-- Relationship Manager -->
+                <div class="relationship-manager" id="relationshipManager" style="display: none;">
+                    <h4>Manage Relationships</h4>
+                    <form id="relationshipForm">
+                        <div class="form-group">
+                            <label>Character 1:</label>
+                            <select id="char1Select" required>
+                                <option value="">Select character...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Character 2:</label>
+                            <select id="char2Select" required>
+                                <option value="">Select character...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Relationship Type:</label>
+                            <select id="relationshipType" required>
+                                <option value="friendship">Friendship</option>
+                                <option value="family">Family</option>
+                                <option value="romantic">Romantic</option>
+                                <option value="rivalry">Rivalry</option>
+                                <option value="mentorship">Mentorship</option>
+                                <option value="alliance">Alliance</option>
+                                <option value="enmity">Enmity</option>
+                                <option value="professional">Professional</option>
+                                <option value="mysterious">Mysterious</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Relationship Status:</label>
+                            <select id="relationshipStatus">
+                                <option value="strong">Strong</option>
+                                <option value="developing">Developing</option>
+                                <option value="strained">Strained</option>
+                                <option value="broken">Broken</option>
+                                <option value="complicated">Complicated</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Description:</label>
+                            <textarea id="relationshipDesc" rows="2" placeholder="Describe their relationship..."></textarea>
+                        </div>
+                        
+                        <button type="submit" class="btn-primary">Add Relationship</button>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="character-list">
+                <h3>Your Characters</h3>
+                <div id="characterList" class="character-cards">
+                    <!-- Characters will be dynamically added here -->
+                </div>
+            </div>
+        </div>
+        
+        <div class="network-section">
+            <div class="network-header">
+                <h3>Character Relationship Network</h3>
+                <div class="network-controls">
+                    <button onclick="toggleRelationshipManager()" class="btn-outline" id="toggleRelationshipsBtn">
+                        Manage Relationships
+                    </button>
+                    <button onclick="exportNetwork()" class="btn-outline">Export Network</button>
+                    <button onclick="resetNetwork()" class="btn-danger">Reset Network</button>
+                </div>
+            </div>
+            
+            <div id="networkGraph" class="network-graph">
+                <p class="placeholder">Add at least 2 characters to see the relationship network</p>
+            </div>
+
+            <div class="network-info">
+                <div class="network-legend">
+                    <h4>Relationship Types:</h4>
+                    <div class="legend-items">
+                        <div class="legend-item"><span class="legend-color friendship"></span> Friendship</div>
+                        <div class="legend-item"><span class="legend-color family"></span> Family</div>
+                        <div class="legend-item"><span class="legend-color romantic"></span> Romantic</div>
+                        <div class="legend-item"><span class="legend-color rivalry"></span> Rivalry</div>
+                        <div class="legend-item"><span class="legend-color mentorship"></span> Mentorship</div>
+                        <div class="legend-item"><span class="legend-color alliance"></span> Alliance</div>
+                        <div class="legend-item"><span class="legend-color enmity"></span> Enmity</div>
+                        <div class="legend-item"><span class="legend-color professional"></span> Professional</div>
+                        <div class="legend-item"><span class="legend-color mysterious"></span> Mysterious</div>
+                    </div>
+                </div>
+                
+                <div class="selected-info" id="selectedInfo">
+                    <h4>Selected Character</h4>
+                    <p class="placeholder">Click on a character in the network to see details</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vis.js Library -->
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+    <script>
+        let network = null;
+        let relationships = [];
+
+        // Load characters from localStorage
+        function loadCharacters() {
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            const characterList = document.getElementById('characterList');
+            
+            if (characters.length === 0) {
+                characterList.innerHTML = '<p class="no-characters">No characters yet. Add your first character above!</p>';
+                return;
+            }
+            
+            characterList.innerHTML = characters.map(character => `
+                <div class="character-card" data-id="${character.id}">
+                    <h4>${character.name}</h4>
+                    <p class="character-role">${character.role || 'No role specified'}</p>
+                    <p class="character-desc">${character.description || 'No description'}</p>
+                    <div class="character-actions">
+                        <button onclick="editCharacter('${character.id}')">Edit</button>
+                        <button onclick="deleteCharacter('${character.id}')" class="btn-danger">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+            
+            updateCharacterSelects();
+            updateNetworkGraph();
+        }
+        
+        // Update character selects for relationships
+        function updateCharacterSelects() {
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            const char1Select = document.getElementById('char1Select');
+            const char2Select = document.getElementById('char2Select');
+            
+            // Clear existing options except the first one
+            while (char1Select.options.length > 1) char1Select.remove(1);
+            while (char2Select.options.length > 1) char2Select.remove(1);
+            
+            // Add characters to both selects
+            characters.forEach(character => {
+                const option1 = new Option(character.name, character.id);
+                const option2 = new Option(character.name, character.id);
+                char1Select.add(option1);
+                char2Select.add(option2);
+            });
+        }
+        
+        // Generate unique ID for characters
+        function generateId() {
+            return Date.now().toString(36) + Math.random().toString(36).substr(2);
+        }
+        
+        // Add new character
+        document.getElementById('characterForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const character = {
+                id: generateId(),
+                name: formData.get('name'),
+                role: formData.get('role'),
+                description: formData.get('description'),
+                goals: formData.get('goals'),
+                createdAt: new Date().toISOString()
+            };
+            
+            // Save to localStorage
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            characters.push(character);
+            localStorage.setItem('characters', JSON.stringify(characters));
+            
+            // Reload the list
+            loadCharacters();
+            
+            // Reset form
+            this.reset();
+        });
+        
+        // Delete character
+        function deleteCharacter(characterId) {
+            if (confirm('Are you sure you want to delete this character? This will also remove all their relationships.')) {
+                const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+                const filteredCharacters = characters.filter(char => char.id !== characterId);
+                localStorage.setItem('characters', JSON.stringify(filteredCharacters));
+                
+                // Remove relationships involving this character
+                relationships = relationships.filter(rel => 
+                    rel.from !== characterId && rel.to !== characterId
+                );
+                localStorage.setItem('relationships', JSON.stringify(relationships));
+                
+                loadCharacters();
+            }
+        }
+        
+        // Edit character (placeholder for now)
+        function editCharacter(characterId) {
+            alert('Edit feature coming soon!');
+        }
+        
+        // Toggle relationship manager visibility
+        function toggleRelationshipManager() {
+            const manager = document.getElementById('relationshipManager');
+            const btn = document.getElementById('toggleRelationshipsBtn');
+            
+            if (manager.style.display === 'none') {
+                manager.style.display = 'block';
+                btn.textContent = 'Hide Relationships';
+            } else {
+                manager.style.display = 'none';
+                btn.textContent = 'Manage Relationships';
+            }
+        }
+        
+        // Add relationship
+        document.getElementById('relationshipForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const char1 = document.getElementById('char1Select').value;
+            const char2 = document.getElementById('char2Select').value;
+            const type = document.getElementById('relationshipType').value;
+            const status = document.getElementById('relationshipStatus').value;
+            const description = document.getElementById('relationshipDesc').value;
+            
+            if (char1 === char2) {
+                alert('A character cannot have a relationship with themselves!');
+                return;
+            }
+            
+            // Check if relationship already exists
+            const existingRelationship = relationships.find(rel => 
+                (rel.from === char1 && rel.to === char2) || (rel.from === char2 && rel.to === char1)
+            );
+            
+            if (existingRelationship) {
+                if (!confirm('A relationship already exists between these characters. Update it?')) {
+                    return;
+                }
+                // Update existing relationship
+                existingRelationship.type = type;
+                existingRelationship.status = status;
+                existingRelationship.description = description;
+                existingRelationship.label = getRelationshipLabel(type, status);
+            } else {
+                // Create new relationship
+                const relationship = {
+                    id: generateId(),
+                    from: char1,
+                    to: char2,
+                    type: type,
+                    status: status,
+                    description: description,
+                    label: getRelationshipLabel(type, status),
+                    color: getRelationshipColor(type)
+                };
+                relationships.push(relationship);
+            }
+            
+            // Save to localStorage
+            localStorage.setItem('relationships', JSON.stringify(relationships));
+            
+            // Update network
+            updateNetworkGraph();
+            
+            // Reset form
+            this.reset();
+        });
+        
+        // Get relationship label
+        function getRelationshipLabel(type, status) {
+            const typeLabels = {
+                friendship: 'Friends',
+                family: 'Family',
+                romantic: 'Lovers',
+                rivalry: 'Rivals',
+                mentorship: 'Mentor',
+                alliance: 'Allies',
+                enmity: 'Enemies',
+                professional: 'Colleagues',
+                mysterious: '???'
+            };
+            
+            return typeLabels[type] || type;
+        }
+        
+        // Get relationship color
+        function getRelationshipColor(type) {
+            const colors = {
+                friendship: '#27ae60',
+                family: '#e67e22',
+                romantic: '#e74c3c',
+                rivalry: '#f39c12',
+                mentorship: '#3498db',
+                alliance: '#9b59b6',
+                enmity: '#c0392b',
+                professional: '#34495e',
+                mysterious: '#7f8c8d'
+            };
+            
+            return { color: colors[type] || '#95a5a6' };
+        }
+        
+        // Update network graph visualization
+        function updateNetworkGraph() {
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            relationships = JSON.parse(localStorage.getItem('relationships') || '[]');
+            const networkContainer = document.getElementById('networkGraph');
+            
+            if (characters.length < 2) {
+                networkContainer.innerHTML = '<p class="placeholder">Add at least 2 characters to see the relationship network</p>';
+                return;
+            }
+            
+            // Create nodes from characters
+            const nodes = new vis.DataSet(
+                characters.map((character, index) => ({
+                    id: character.id,
+                    label: character.name,
+                    group: character.role || 'default',
+                    value: 10,
+                    font: { size: 16, face: 'Arial' },
+                    shape: 'circle',
+                    color: getNodeColor(index)
+                }))
+            );
+            
+            // Create edges from relationships
+            const edges = new vis.DataSet(
+                relationships.map(relationship => ({
+                    id: relationship.id,
+                    from: relationship.from,
+                    to: relationship.to,
+                    label: relationship.label,
+                    color: relationship.color,
+                    width: 2,
+                    arrows: {
+                        to: { enabled: false },
+                        from: { enabled: false }
+                    },
+                    font: { size: 12, strokeWidth: 3, align: 'top' },
+                    smooth: { enabled: true, type: 'continuous' }
+                }))
+            );
+            
+            // Network options - NO TOOLTIPS
+            const options = {
+                nodes: {
+                    borderWidth: 2,
+                    size: 30,
+                    shadow: true,
+                    font: {
+                        size: 16,
+                        face: 'Arial',
+                        strokeWidth: 3
+                    }
+                },
+                edges: {
+                    shadow: true,
+                    smooth: true,
+                    font: {
+                        size: 12,
+                        strokeWidth: 3
+                    }
+                },
+                physics: {
+                    enabled: true,
+                    stabilization: true,
+                    barnesHut: {
+                        gravitationalConstant: -8000,
+                        springConstant: 0.04,
+                        springLength: 95
+                    }
+                },
+                interaction: {
+                    hover: false, // Disable hover
+                    tooltipDelay: 0,
+                    hideEdgesOnDrag: true,
+                    hoverConnectedEdges: false
+                },
+                layout: {
+                    improvedLayout: true
+                }
+            };
+            
+            // Create network
+            const data = { nodes: nodes, edges: edges };
+            networkContainer.innerHTML = '';
+            
+            network = new vis.Network(networkContainer, data, options);
+            
+            // Add click event to show character details
+            network.on("click", function(params) {
+                if (params.nodes.length > 0) {
+                    const nodeId = params.nodes[0];
+                    const character = characters.find(c => c.id === nodeId);
+                    if (character) {
+                        showCharacterDetails(character);
+                    }
+                } else {
+                    // Clear selection if clicking empty space
+                    document.getElementById('selectedInfo').innerHTML = `
+                        <h4>Selected Character</h4>
+                        <p class="placeholder">Click on a character in the network to see details</p>
+                    `;
+                }
+            });
+        }
+        
+        // Show character details in the info panel
+        function showCharacterDetails(character) {
+            const selectedInfo = document.getElementById('selectedInfo');
+            const relationships = JSON.parse(localStorage.getItem('relationships') || '[]');
+            
+            // Find relationships for this character
+            const characterRelationships = relationships.filter(rel => 
+                rel.from === character.id || rel.to === character.id
+            );
+            
+            // Get connected characters
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            const connectedChars = characterRelationships.map(rel => {
+                const otherCharId = rel.from === character.id ? rel.to : rel.from;
+                const otherChar = characters.find(c => c.id === otherCharId);
+                return otherChar ? { character: otherChar, relationship: rel } : null;
+            }).filter(Boolean);
+            
+            selectedInfo.innerHTML = `
+                <h4>${character.name}</h4>
+                ${character.role ? `<p><strong>Role:</strong> ${character.role}</p>` : ''}
+                ${character.description ? `<p><strong>Description:</strong> ${character.description}</p>` : ''}
+                ${character.goals ? `<p><strong>Goals:</strong> ${character.goals}</p>` : ''}
+                
+                ${connectedChars.length > 0 ? `
+                    <div class="relationships-list">
+                        <h5>Relationships:</h5>
+                        ${connectedChars.map(conn => `
+                            <div class="relationship-item">
+                                <span class="relationship-dot" style="background-color: ${conn.relationship.color.color}"></span>
+                                <strong>${conn.character.name}</strong> - ${conn.relationship.label}
+                                ${conn.relationship.description ? `<br><small>${conn.relationship.description}</small>` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<p>No relationships yet.</p>'}
+            `;
+        }
+        
+        // Get node color based on index
+        function getNodeColor(index) {
+            const colors = [
+                '#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6',
+                '#1abc9c', '#d35400', '#c0392b', '#16a085', '#8e44ad'
+            ];
+            return colors[index % colors.length];
+        }
+        
+        // Export network data
+        function exportNetwork() {
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            const relationships = JSON.parse(localStorage.getItem('relationships') || '[]');
+            
+            const exportData = {
+                characters: characters,
+                relationships: relationships,
+                exportedAt: new Date().toISOString()
+            };
+            
+            const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'character-network.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+        
+        // Reset network (clear relationships)
+        function resetNetwork() {
+            if (confirm('Are you sure you want to clear all relationships? This cannot be undone.')) {
+                localStorage.removeItem('relationships');
+                relationships = [];
+                updateNetworkGraph();
+                document.getElementById('selectedInfo').innerHTML = `
+                    <h4>Selected Character</h4>
+                    <p class="placeholder">Click on a character in the network to see details</p>
+                `;
+            }
+        }
+        
+        // Load characters when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCharacters();
+            
+            // Load existing relationships
+            relationships = JSON.parse(localStorage.getItem('relationships') || '[]');
+            
+            // Show relationship manager if we have characters
+            const characters = JSON.parse(localStorage.getItem('characters') || '[]');
+            if (characters.length >= 2) {
+                document.getElementById('toggleRelationshipsBtn').style.display = 'inline-block';
+            }
+        });
+    </script>
+
+    <style>
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+        
+        .character-section {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+        
+        .character-form {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .relationship-manager {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 2px solid #ecf0f1;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+        
+        .character-list {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .character-cards {
+            display: grid;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        
+        .character-card {
+            border: 1px solid #e1e1e1;
+            padding: 1rem;
+            border-radius: 8px;
+            background: #f8f9fa;
+        }
+        
+        .character-card h4 {
+            margin: 0 0 0.5rem 0;
+            color: #2c3e50;
+        }
+        
+        .character-role {
+            font-style: italic;
+            color: #7f8c8d;
+            margin: 0 0 0.5rem 0;
+        }
+        
+        .character-desc {
+            margin: 0 0 1rem 0;
+            color: #555;
+        }
+        
+        .character-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .character-actions button {
+            padding: 0.25rem 0.75rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .btn-danger {
+            background: #e74c3c;
+            color: white;
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 1px solid #3498db;
+            color: #3498db;
+        }
+        
+        .btn-outline:hover {
+            background: #3498db;
+            color: white;
+        }
+        
+        .network-section {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .network-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .network-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .network-graph {
+            height: 500px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e1e1e1;
+            margin-bottom: 1rem;
+        }
+        
+        .placeholder {
+            color: #7f8c8d;
+            font-style: italic;
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .no-characters {
+            text-align: center;
+            color: #7f8c8d;
+            padding: 2rem;
+        }
+        
+        .network-info {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 2rem;
+        }
+        
+        .network-legend {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+        }
+        
+        .network-legend h4 {
+            margin: 0 0 1rem 0;
+            color: #2c3e50;
+        }
+        
+        .legend-items {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.5rem;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+        
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .legend-color.friendship { background: #27ae60; }
+        .legend-color.family { background: #e67e22; }
+        .legend-color.romantic { background: #e74c3c; }
+        .legend-color.rivalry { background: #f39c12; }
+        .legend-color.mentorship { background: #3498db; }
+        .legend-color.alliance { background: #9b59b6; }
+        .legend-color.enmity { background: #c0392b; }
+        .legend-color.professional { background: #34495e; }
+        .legend-color.mysterious { background: #7f8c8d; }
+        
+        .selected-info {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .selected-info h4 {
+            margin: 0 0 1rem 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 0.5rem;
+        }
+        
+        .relationships-list {
+            margin-top: 1rem;
+        }
+        
+        .relationships-list h5 {
+            margin: 0 0 0.5rem 0;
+            color: #2c3e50;
+        }
+        
+        .relationship-item {
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            background: white;
+            border-radius: 4px;
+            border-left: 4px solid #3498db;
+        }
+        
+        .relationship-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.5rem;
+        }
+    </style>
+<%- include('../partials/footer') %>
